@@ -1,4 +1,4 @@
-import sqlite3
+import psycopg2
 import streamlit as st
 from datetime import datetime, date
 from fpdf import FPDF
@@ -34,18 +34,13 @@ def verificar_login():
 if verificar_login():
 
     # -------------------------------------------------------------------
-    # BANCO DE DADOS EXPANDIDO (REINICIALIZAÇÃO COMPLETA DAS TABELAS)
+    # CONEXÃO COM O SUPABASE (POSTGRESQL) E CRIAÇÃO DAS TABELAS
     # -------------------------------------------------------------------
     def conectar_banco():
-        conn = sqlite3.connect("banco_pmpe.db")
+        # Conecta via URL salva no Streamlit Cloud Secrets
+        db_url = st.secrets["postgres"]["url"]
+        conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
-        
-        if "banco_reestruturado" not in st.session_state:
-            cursor.execute("DROP TABLE IF EXISTS policiais")
-            cursor.execute("DROP TABLE IF EXISTS punicoes")
-            cursor.execute("DROP TABLE IF EXISTS elogios")
-            cursor.execute("DROP TABLE IF EXISTS observacoes")
-            st.session_state["banco_reestruturado"] = True
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS policiais (
@@ -62,38 +57,35 @@ if verificar_login():
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS punicoes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                matricula TEXT NOT NULL,
+                id SERIAL PRIMARY KEY,
+                matricula TEXT NOT NULL REFERENCES policiais(matricula) ON DELETE CASCADE,
                 tipo_pena TEXT NOT NULL,
                 dias_pena INTEGER NOT NULL,
                 boletim TEXT NOT NULL,
                 data_fato DATE NOT NULL,
                 data_inicio DATE NOT NULL,
-                data_fim DATE NOT NULL,
-                FOREIGN KEY (matricula) REFERENCES policiais (matricula)
+                data_fim DATE NOT NULL
             )
         ''')
         
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS elogios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                matricula TEXT NOT NULL,
+                id SERIAL PRIMARY KEY,
+                matricula TEXT NOT NULL REFERENCES policiais(matricula) ON DELETE CASCADE,
                 tipo_elogio TEXT NOT NULL,
                 boletim TEXT NOT NULL,
                 data_elogio DATE NOT NULL,
-                descricao TEXT NOT NULL,
-                FOREIGN KEY (matricula) REFERENCES policiais (matricula)
+                descricao TEXT NOT NULL
             )
         ''')
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS observacoes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                matricula TEXT NOT NULL,
+                id SERIAL PRIMARY KEY,
+                matricula TEXT NOT NULL REFERENCES policiais(matricula) ON DELETE CASCADE,
                 data_registro DATE NOT NULL,
                 categoria TEXT NOT NULL,
-                descricao TEXT NOT NULL,
-                FOREIGN KEY (matricula) REFERENCES policiais (matricula)
+                descricao TEXT NOT NULL
             )
         ''')
         
@@ -134,7 +126,9 @@ if verificar_login():
         pdf.cell(95, 6, f"Nome: {pm[3]} {pm[1]}", 1)
         pdf.cell(95, 6, f"Situação: {pm[7]}", 1, 1)
         pdf.cell(95, 6, f"OME: {pm[4]} ({pm[5] if pm[5] else 'Geral'})", 1)
-        pdf.cell(95, 6, f"Data de Inclusão: {datetime.strptime(pm[6], '%Y-%m-%d').strftime('%d/%m/%Y')}", 1, 1)
+        
+        dt_inc_str = pm[6].strftime("%d/%m/%Y") if isinstance(pm[6], (date, datetime)) else datetime.strptime(str(pm[6]), '%Y-%m-%d').strftime('%d/%m/%Y')
+        pdf.cell(95, 6, f"Data de Inclusão: {dt_inc_str}", 1, 1)
         
         pdf.ln(4)
         
@@ -159,7 +153,7 @@ if verificar_login():
             pdf.cell(100, 6, 'Descrição', 1, 1)
             pdf.set_font('Helvetica', '', 8)
             for e in elogios:
-                dt = datetime.strptime(e[4], '%Y-%m-%d').strftime('%d/%m/%Y')
+                dt = e[4].strftime("%d/%m/%Y") if isinstance(e[4], (date, datetime)) else datetime.strptime(str(e[4]), '%Y-%m-%d').strftime('%d/%m/%Y')
                 pdf.cell(25, 6, dt, 1)
                 pdf.cell(35, 6, e[2], 1)
                 pdf.cell(30, 6, e[3], 1)
@@ -182,9 +176,9 @@ if verificar_login():
             pdf.cell(90, 6, 'Período', 1, 1)
             pdf.set_font('Helvetica', '', 8)
             for p in punicoes:
-                dt_f = datetime.strptime(p[5], '%Y-%m-%d').strftime('%d/%m/%Y')
-                dt_i = datetime.strptime(p[6], '%Y-%m-%d').strftime('%d/%m/%Y')
-                dt_m = datetime.strptime(p[7], '%Y-%m-%d').strftime('%d/%m/%Y')
+                dt_f = p[5].strftime("%d/%m/%Y") if isinstance(p[5], (date, datetime)) else datetime.strptime(str(p[5]), '%Y-%m-%d').strftime('%d/%m/%Y')
+                dt_i = p[6].strftime("%d/%m/%Y") if isinstance(p[6], (date, datetime)) else datetime.strptime(str(p[6]), '%Y-%m-%d').strftime('%d/%m/%Y')
+                dt_m = p[7].strftime("%d/%m/%Y") if isinstance(p[7], (date, datetime)) else datetime.strptime(str(p[7]), '%Y-%m-%d').strftime('%d/%m/%Y')
                 pdf.cell(25, 6, dt_f, 1)
                 pdf.cell(30, 6, p[2], 1)
                 pdf.cell(15, 6, str(p[3]), 1)
@@ -206,7 +200,7 @@ if verificar_login():
             pdf.cell(125, 6, 'Descrição', 1, 1)
             pdf.set_font('Helvetica', '', 8)
             for o in obs:
-                dt = datetime.strptime(o[2], '%Y-%m-%d').strftime('%d/%m/%Y')
+                dt = o[2].strftime("%d/%m/%Y") if isinstance(o[2], (date, datetime)) else datetime.strptime(str(o[2]), '%Y-%m-%d').strftime('%d/%m/%Y')
                 pdf.cell(25, 6, dt, 1)
                 pdf.cell(40, 6, o[3], 1)
                 pdf.cell(125, 6, str(o[4])[:70], 1, 1)
@@ -228,29 +222,29 @@ if verificar_login():
         conn = conectar_banco()
         cursor = conn.cursor()
 
-        cursor.execute("SELECT * FROM policiais WHERE matricula = ?", (matricula,))
+        cursor.execute("SELECT * FROM policiais WHERE matricula = %s", (matricula,))
         pm = cursor.fetchone()
         if not pm:
             conn.close()
             return None, None, None, [], [], []
 
-        cursor.execute("SELECT * FROM punicoes WHERE matricula = ? ORDER BY data_fim DESC", (matricula,))
+        cursor.execute("SELECT * FROM punicoes WHERE matricula = %s ORDER BY data_fim DESC", (matricula,))
         punicoes = cursor.fetchall()
 
-        cursor.execute("SELECT * FROM elogios WHERE matricula = ? ORDER BY data_elogio DESC", (matricula,))
+        cursor.execute("SELECT * FROM elogios WHERE matricula = %s ORDER BY data_elogio DESC", (matricula,))
         elogios = cursor.fetchall()
 
-        cursor.execute("SELECT * FROM observacoes WHERE matricula = ? ORDER BY data_registro DESC", (matricula,))
+        cursor.execute("SELECT * FROM observacoes WHERE matricula = %s ORDER BY data_registro DESC", (matricula,))
         obs = cursor.fetchall()
         
         conn.close()
 
-        data_inclusao = datetime.strptime(pm[6], "%Y-%m-%d").date()
+        data_inclusao = pm[6] if isinstance(pm[6], date) else datetime.strptime(str(pm[6]), "%Y-%m-%d").date()
         hoje = date.today()
         punicoes_ativas = []
         
         for p in punicoes:
-            dt_fim = datetime.strptime(p[7], "%Y-%m-%d").date()
+            dt_fim = p[7] if isinstance(p[7], date) else datetime.strptime(str(p[7]), "%Y-%m-%d").date()
             anos_decorridos = (hoje - dt_fim).days / 365.25
             if not ((p[2] == 'Prisão' and anos_decorridos >= 6) or (p[2] == 'Detenção' and anos_decorridos >= 4)):
                 punicoes_ativas.append((p[2], dt_fim))
@@ -371,11 +365,11 @@ if verificar_login():
                 conn = conectar_banco()
                 cursor = conn.cursor()
                 try:
-                    cursor.execute("INSERT INTO policiais VALUES (?, ?, ?, ?, ?, ?, ?, ?)", 
+                    cursor.execute("INSERT INTO policiais VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", 
                                    (mat, nome, cpf, posto, ome, subunidade, str(dt_inc), situacao))
                     conn.commit()
                     st.success("Policial cadastrado com sucesso!")
-                except sqlite3.IntegrityError:
+                except psycopg2.IntegrityError:
                     st.error("Matrícula já cadastrada!")
                 conn.close()
 
@@ -392,7 +386,7 @@ if verificar_login():
             if st.form_submit_button("Salvar Elogio") and mat_e and bol_e:
                 conn = conectar_banco()
                 cursor = conn.cursor()
-                cursor.execute("INSERT INTO elogios (matricula, tipo_elogio, boletim, data_elogio, descricao) VALUES (?, ?, ?, ?, ?)",
+                cursor.execute("INSERT INTO elogios (matricula, tipo_elogio, boletim, data_elogio, descricao) VALUES (%s, %s, %s, %s, %s)",
                                (mat_e, tipo_e, bol_e, str(dt_e), desc_e))
                 conn.commit()
                 conn.close()
@@ -413,7 +407,7 @@ if verificar_login():
             if st.form_submit_button("Salvar Punição") and mat_p and bol_p:
                 conn = conectar_banco()
                 cursor = conn.cursor()
-                cursor.execute("INSERT INTO punicoes (matricula, tipo_pena, dias_pena, boletim, data_fato, data_inicio, data_fim) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                cursor.execute("INSERT INTO punicoes (matricula, tipo_pena, dias_pena, boletim, data_fato, data_inicio, data_fim) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                                (mat_p, tipo_p, dias_p, bol_p, str(dt_fato), str(dt_i), str(dt_f)))
                 conn.commit()
                 conn.close()
@@ -431,7 +425,7 @@ if verificar_login():
             if st.form_submit_button("Salvar Observação") and mat_o:
                 conn = conectar_banco()
                 cursor = conn.cursor()
-                cursor.execute("INSERT INTO observacoes (matricula, data_registro, categoria, descricao) VALUES (?, ?, ?, ?)",
+                cursor.execute("INSERT INTO observacoes (matricula, data_registro, categoria, descricao) VALUES (%s, %s, %s, %s)",
                                (mat_o, str(dt_o), cat_o, desc_o))
                 conn.commit()
                 conn.close()
@@ -444,7 +438,7 @@ if verificar_login():
         if mat_busca_ed:
             conn = conectar_banco()
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM policiais WHERE matricula = ?", (mat_busca_ed,))
+            cursor.execute("SELECT * FROM policiais WHERE matricula = %s", (mat_busca_ed,))
             pm = cursor.fetchone()
             conn.close()
 
@@ -462,7 +456,7 @@ if verificar_login():
                     nova_ome = c2.text_input("OME", value=pm[4])
                     nova_sub = c1.text_input("Subunidade / Seção", value=pm[5] if pm[5] else "")
                     
-                    dt_inc_atual = datetime.strptime(pm[6], "%Y-%m-%d").date()
+                    dt_inc_atual = pm[6] if isinstance(pm[6], date) else datetime.strptime(str(pm[6]), "%Y-%m-%d").date()
                     nova_dt = c2.date_input("Data de Inclusão", value=dt_inc_atual)
                     
                     sit_lista = ["ATIVA", "INATIVA / REFORMA", "LICENÇA"]
@@ -474,8 +468,8 @@ if verificar_login():
                         cursor = conn.cursor()
                         cursor.execute("""
                             UPDATE policiais 
-                            SET nome = ?, cpf = ?, posto_graduacao = ?, ome = ?, subunidade = ?, data_inclusao = ?, situacao = ?
-                            WHERE matricula = ?
+                            SET nome = %s, cpf = %s, posto_graduacao = %s, ome = %s, subunidade = %s, data_inclusao = %s, situacao = %s
+                            WHERE matricula = %s
                         """, (novo_nome, novo_cpf, novo_posto, nova_ome, nova_sub, str(nova_dt), nova_sit, mat_busca_ed))
                         conn.commit()
                         conn.close()
@@ -507,7 +501,7 @@ if verificar_login():
                         if st.button("Excluir Elogio Selecionado"):
                             conn = conectar_banco()
                             cursor = conn.cursor()
-                            cursor.execute("DELETE FROM elogios WHERE id = ?", (opcoes_e[sel_e],))
+                            cursor.execute("DELETE FROM elogios WHERE id = %s", (opcoes_e[sel_e],))
                             conn.commit()
                             conn.close()
                             st.success("Elogio excluído com sucesso!")
@@ -521,7 +515,7 @@ if verificar_login():
                         if st.button("Excluir Punição Selecionada"):
                             conn = conectar_banco()
                             cursor = conn.cursor()
-                            cursor.execute("DELETE FROM punicoes WHERE id = ?", (opcoes_p[sel_p],))
+                            cursor.execute("DELETE FROM punicoes WHERE id = %s", (opcoes_p[sel_p],))
                             conn.commit()
                             conn.close()
                             st.success("Punição excluída com sucesso!")
@@ -535,7 +529,7 @@ if verificar_login():
                         if st.button("Excluir Observação Selecionada"):
                             conn = conectar_banco()
                             cursor = conn.cursor()
-                            cursor.execute("DELETE FROM observacoes WHERE id = ?", (opcoes_o[sel_o],))
+                            cursor.execute("DELETE FROM observacoes WHERE id = %s", (opcoes_o[sel_o],))
                             conn.commit()
                             conn.close()
                             st.success("Observação excluída com sucesso!")
@@ -547,10 +541,10 @@ if verificar_login():
                     if st.button("SIM, EXCLUIR DEFINITIVAMENTE ESTE MILITAR"):
                         conn = conectar_banco()
                         cursor = conn.cursor()
-                        cursor.execute("DELETE FROM elogios WHERE matricula = ?", (mat_exc,))
-                        cursor.execute("DELETE FROM punicoes WHERE matricula = ?", (mat_exc,))
-                        cursor.execute("DELETE FROM observacoes WHERE matricula = ?", (mat_exc,))
-                        cursor.execute("DELETE FROM policiais WHERE matricula = ?", (mat_exc,))
+                        cursor.execute("DELETE FROM elogios WHERE matricula = %s", (mat_exc,))
+                        cursor.execute("DELETE FROM punicoes WHERE matricula = %s", (mat_exc,))
+                        cursor.execute("DELETE FROM observacoes WHERE matricula = %s", (mat_exc,))
+                        cursor.execute("DELETE FROM policiais WHERE matricula = %s", (mat_exc,))
                         conn.commit()
                         conn.close()
                         st.success("Policial e todo o seu histórico foram excluídos do sistema com sucesso!")
