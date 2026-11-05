@@ -1,3 +1,4 @@
+import os
 import psycopg2
 import streamlit as st
 from datetime import datetime, date
@@ -6,7 +7,7 @@ from fpdf import FPDF
 # -------------------------------------------------------------------
 # CONFIGURAÇÃO DE PÁGINA E SEGURANÇA
 # -------------------------------------------------------------------
-st.set_page_config(page_title="Sistema Disciplinar PMPE", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Sistema Disciplinar PMPE", page_icon=os.path.join(os.path.dirname(os.path.abspath(__file__)), "icone.png"), layout="wide")
 
 USUARIO_CORRETO = "admin"
 SENHA_CORRETA = "pmpe2026"
